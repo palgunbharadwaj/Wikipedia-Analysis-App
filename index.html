@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Wikipedia Word Cloud</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-cloud@1.2.5/build/d3.layout.cloud.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; }
+        #wordcloud { width: 100vw; height: 80vh; margin: auto; }
+    </style>
+</head>
+<body>
+    <div style="display:flex; flex-direction:row; justify-content:center; align-items:flex-start;">
+        <div id="freqSidebar" style="width:220px; min-height:400px; margin-right:28px; background:#fff; border:3px solid #e74c3c; border-radius:12px; padding:18px 10px 10px 18px; box-sizing:border-box; color:#c0392b; font-family:Arial,sans-serif; font-size:1em; text-align:left;">
+            <div style="font-weight:700; margin-bottom:14px; color:#e74c3c;">Raw Frequencies</div>
+            <div id="freqList" style="color:#c0392b;"></div>
+        </div>
+        <div style="flex:1;">
+            <h1 style="margin-top:32px; margin-bottom:18px; font-size:2.2em; font-weight:700; letter-spacing:1px; text-align:center;">Wikipedia Category Word Cloud</h1>
+            <div style="display:flex; flex-direction:column; align-items:center;">
+                <form id="categoryForm" style="display:flex; gap:12px; align-items:center; margin-bottom:10px;">
+                    <label for="categoryInput" style="font-weight:600; margin-right:6px;">Wikipedia Category:</label>
+                    <input type="text" id="categoryInput" placeholder="Large_language_models" style="width:240px; padding:7px 10px; font-size:1em; border-radius:5px; border:1px solid #bbb;">
+                    <select id="paletteSelect" style="padding:7px 10px; font-size:1em; border-radius:5px; border:1px solid #bbb;"></select>
+                    <button type="submit" style="padding:8px 18px; font-size:1em; border:none; border-radius:5px; background:#27ae60; color:white; font-weight:600; cursor:pointer; transition:background 0.2s;">Generate Word Cloud</button>
+                </form>
+                <div style="font-size:0.97em; color:#888; margin-bottom:8px; margin-top:-6px;">You can type any Wikipedia category and click Generate.</div>
+                <div id="colorPreview" style="margin-bottom:20px; min-height:28px;"></div>
+            </div>
+            <div id="loading" style="display:none; font-size:1.1em; margin-top:10px;">Loading...</div>
+            <div id="wordcloud" style="width:90vw; max-width:1100px; height:70vh; margin:30px auto 0 auto; background:linear-gradient(135deg,#f8f9fa 70%,#e0e7ef 100%); border-radius:18px; box-shadow:0 4px 16px rgba(0,0,0,0.08);"></div>
+        </div>
+    </div>
+    <script>
+    let palettes = [];
+    let currentPalette = [];
+    let currentPaletteName = '';
+
+    async function fetchPalettes() {
+        const res = await fetch('/api/palettes');
+        palettes = await res.json();
+        const paletteSelect = document.getElementById('paletteSelect');
+        paletteSelect.innerHTML = '';
+        palettes.forEach((p, i) => {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = p.name;
+            paletteSelect.appendChild(opt);
+        });
+        paletteSelect.selectedIndex = 0;
+        updateColorPreview();
+    }
+
+    function updateColorPreview() {
+        const paletteSelect = document.getElementById('paletteSelect');
+        const idx = paletteSelect.selectedIndex;
+        if (palettes.length === 0) return;
+        currentPalette = palettes[idx].colors;
+        currentPaletteName = palettes[idx].name;
+        const preview = document.getElementById('colorPreview');
+        preview.innerHTML = '';
+        currentPalette.forEach(color => {
+            const swatch = document.createElement('span');
+            swatch.style.display = 'inline-block';
+            swatch.style.width = '34px';
+            swatch.style.height = '24px';
+            swatch.style.marginRight = '5px';
+            swatch.style.background = color;
+            swatch.style.borderRadius = '5px';
+            swatch.style.border = '1.5px solid #bbb';
+            preview.appendChild(swatch);
+        });
+    }
+
+    async function fetchWordFreq(category) {
+        const res = await fetch(`/api/wordfreq?category=${encodeURIComponent(category)}`);
+        return await res.json();
+    }
+
+    function renderWordCloud(words) {
+        const width = Math.min(window.innerWidth * 0.85, 1000);
+        const height = 520;
+        d3.select('#wordcloud').html('');
+        if (!words.length) {
+            d3.select('#wordcloud').append('div').style('margin-top','60px').style('font-size','1.5em').style('color','#e74c3c').text('No data found.');
+            return;
+        }
+        const layout = d3.layout.cloud()
+            .size([width, height])
+            .words(words.map(d => Object.assign({}, d)))
+            .padding(6)
+            .rotate(() => ~~(Math.random() * 2) * 90)
+            .font('Impact')
+            .fontSize(d => 18 + Math.sqrt(d.size) * 3)
+            .on('end', draw);
+        layout.start();
+        function draw(words) {
+            d3.select('#wordcloud').append('svg')
+                .attr('width', width)
+                .attr('height', height)
+                .append('g')
+                .attr('transform', `translate(${width/2},${height/2})`)
+                .selectAll('text')
+                .data(words)
+                .enter().append('text')
+                .style('font-family', 'Impact')
+                .style('font-size', d => d.size + 'px')
+                .style('fill', (d,i) => currentPalette[i % currentPalette.length])
+                .attr('text-anchor', 'middle')
+                .attr('transform', d => `translate(${d.x},${d.y})rotate(${d.rotate})`)
+                .text(d => d.text);
+        }
+    }
+
+    function renderRawFreq(words) {
+        const freqList = document.getElementById('freqList');
+        if (!words.length) {
+            freqList.innerHTML = '<div style="color:#e74c3c;">No data found.</div>';
+            return;
+        }
+        const sorted = words.slice().sort((a,b) => b.size-a.size);
+        freqList.innerHTML = sorted.slice(0,50).map(w => `<div style="display:flex;justify-content:space-between;"><span>${w.text}</span><span style="font-weight:600;">${w.size}</span></div>`).join('');
+    }
+
+    document.getElementById('paletteSelect').addEventListener('change', updateColorPreview);
+
+    document.getElementById('categoryForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const category = document.getElementById('categoryInput').value.trim() || 'Large_language_models';
+        document.getElementById('loading').style.display = '';
+        const words = await fetchWordFreq(category);
+        document.getElementById('loading').style.display = 'none';
+        renderWordCloud(words);
+        renderRawFreq(words);
+    });
+
+    window.onload = async function() {
+        await fetchPalettes();
+        updateColorPreview();
+    };
+    </script>
+</body>
+</html>
